@@ -88,14 +88,9 @@ export async function uploadV2({
     cacheContent.program = {};
   }
 
-  let existingInCache = [];
-  if (!cacheContent.items) {
-    cacheContent.items = {};
-  } else {
-    existingInCache = Object.keys(cacheContent.items);
-  }
-  const dedupedAssetKeys = getAssetKeysNeedingUpload(existingInCache, files);
+  const dedupedAssetKeys = getAssetKeysNeedingUpload(cacheContent.items, files);
   const SIZE = dedupedAssetKeys.length;
+  console.log('Size', SIZE, dedupedAssetKeys[0]);
   let candyMachine = cacheContent.program.candyMachine
     ? new PublicKey(cacheContent.program.candyMachine)
     : undefined;
@@ -206,7 +201,7 @@ export async function uploadV2({
       chunks(Array.from(Array(SIZE).keys()), batchSize || 50).map(
         async allIndexesInSlice => {
           for (let i = 0; i < allIndexesInSlice.length; i++) {
-            const assetKey = dedupedAssetKeys[i];
+            const assetKey = dedupedAssetKeys[allIndexesInSlice[i]];
             const image = path.join(
               dirname,
               `${assetKey.index}${assetKey.mediaExt}`,
@@ -218,12 +213,15 @@ export async function uploadV2({
                 : `${assetKey.index}.json`,
             );
             const manifestBuffer = Buffer.from(JSON.stringify(manifest));
-            if (i >= lastPrinted + tick || i === 0) {
+            if (
+              allIndexesInSlice[i] >= lastPrinted + tick ||
+              allIndexesInSlice[i] === 0
+            ) {
               lastPrinted = i;
-              log.info(`Processing asset: ${assetKey}`);
+              log.info(`Processing asset: ${allIndexesInSlice[i]}`);
             }
 
-            if (i === 0 && !cacheContent.program.uuid) {
+            if (allIndexesInSlice[i] === 0 && !cacheContent.program.uuid) {
               try {
                 const remainingAccounts = [];
 
@@ -281,9 +279,12 @@ export async function uploadV2({
               }
             }
 
-            if (i >= lastPrinted + tick || i === 0) {
-              lastPrinted = i;
-              log.info(`Processing asset: ${assetKey}`);
+            if (
+              allIndexesInSlice[i] >= lastPrinted + tick ||
+              allIndexesInSlice[i] === 0
+            ) {
+              lastPrinted = allIndexesInSlice[i];
+              log.info(`Processing asset: ${allIndexesInSlice[i]}`);
             }
 
             let link, imageLink;
@@ -312,11 +313,11 @@ export async function uploadV2({
                     image,
                     manifestBuffer,
                     manifest,
-                    i,
+                    assetKey.index,
                   );
               }
               if (link && imageLink) {
-                log.debug('Updating cache for ', assetKey);
+                log.debug('Updating cache for ', allIndexesInSlice[i]);
                 cacheContent.items[assetKey.index] = {
                   link,
                   imageLink,
@@ -327,7 +328,7 @@ export async function uploadV2({
               }
             } catch (err) {
               log.error(`Error uploading file ${assetKey}`, err);
-              throw err;
+              i--;
             }
           }
         },
@@ -457,6 +458,7 @@ function getAssetKeysNeedingUpload(
     .reduce((acc, assetKey) => {
       const ext = path.extname(assetKey);
       const key = path.basename(assetKey, ext);
+
       if (!items[key]?.link && !keyMap[key]) {
         keyMap[key] = true;
         acc.push({ mediaExt: ext, index: key });
